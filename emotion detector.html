@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emotion AI — Local Detection</title>
+<script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #050a12;
+    --surface: #0c1420;
+    --surface2: #111c2e;
+    --border: #1a2d46;
+    --teal: #00e5c3;
+    --teal2: #00b49a;
+    --text: #e2eaf4;
+    --muted: #4a6580;
+    --muted2: #6b8ca8;
+    --happy:    #22c55e;
+    --sad:      #60a5fa;
+    --angry:    #ef4444;
+    --fearful:  #a855f7;
+    --surprised:#f59e0b;
+    --disgusted:#f97316;
+    --neutral:  #94a3b8;
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content:'';
+    position:fixed; inset:0;
+    background-image:
+      linear-gradient(rgba(0,229,195,.03) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(0,229,195,.03) 1px,transparent 1px);
+    background-size:48px 48px;
+    pointer-events:none; z-index:0;
+  }
+
+  /* HEADER */
+  header {
+    position:relative; z-index:10;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 32px;
+    border-bottom:1px solid var(--border);
+    background:rgba(5,10,18,.85); backdrop-filter:blur(12px);
+  }
+  .logo { display:flex; align-items:center; gap:12px; }
+  .logo-icon {
+    width:36px; height:36px;
+    background:linear-gradient(135deg,var(--teal),#3b82f6);
+    border-radius:10px; display:flex; align-items:center; justify-content:center;
+    font-size:17px;
+    animation:glow 3s ease-in-out infinite;
+  }
+  @keyframes glow {
+    0%,100%{box-shadow:0 0 18px rgba(0,229,195,.3)}
+    50%{box-shadow:0 0 32px rgba(0,229,195,.6)}
+  }
+  .logo-text { font-size:19px; font-weight:800; letter-spacing:-.5px; }
+  .logo-text span { color:var(--teal); }
+
+  .hdr-right { display:flex; align-items:center; gap:16px; }
+  .status-pill {
+    display:flex; align-items:center; gap:7px;
+    font-family:'Space Mono',monospace; font-size:11px; color:var(--muted2);
+    padding:5px 12px; background:var(--surface); border:1px solid var(--border); border-radius:20px;
+  }
+  .dot { width:7px; height:7px; border-radius:50%; background:var(--muted); transition:all .3s; }
+  .dot.live { background:var(--teal); box-shadow:0 0 7px var(--teal); animation:blink 1.5s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  /* LOADING SCREEN */
+  #loader {
+    position:relative; z-index:10;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    min-height:calc(100vh - 73px); gap:24px;
+  }
+  .loader-box {
+    background:var(--surface); border:1px solid var(--border); border-radius:20px;
+    padding:48px; max-width:480px; width:100%; text-align:center;
+  }
+  .loader-box h2 { font-size:24px; font-weight:800; margin-bottom:8px; }
+  .loader-box h2 span { color:var(--teal); }
+  .loader-box p { color:var(--muted2); font-size:13px; line-height:1.7; margin-bottom:28px; }
+  .progress-bar {
+    width:100%; height:6px; background:var(--surface2); border-radius:3px; overflow:hidden; margin-bottom:12px;
+  }
+  .progress-fill {
+    height:100%; background:linear-gradient(90deg,var(--teal),#3b82f6);
+    border-radius:3px; width:0%; transition:width .4s ease;
+  }
+  .progress-label {
+    font-family:'Space Mono',monospace; font-size:11px; color:var(--muted2); text-align:left;
+  }
+  .loader-steps { margin-top:20px; text-align:left; }
+  .step {
+    display:flex; align-items:center; gap:10px;
+    padding:8px 0; border-bottom:1px solid var(--border);
+    font-size:13px; color:var(--muted2);
+    font-family:'Space Mono',monospace;
+  }
+  .step:last-child { border-bottom:none; }
+  .step-icon { font-size:14px; width:20px; text-align:center; }
+  .step.done { color:var(--teal); }
+  .step.active { color:var(--text); }
+
+  /* APP */
+  #app {
+    display:none; position:relative; z-index:10;
+    max-width:1280px; margin:0 auto;
+    padding:24px 28px; flex-direction:column; gap:20px;
+  }
+  #app.visible { display:flex; }
+
+  /* CONTROLS */
+  .controls {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  }
+  .btn {
+    display:flex; align-items:center; gap:7px;
+    padding:9px 18px; border-radius:8px; border:1px solid var(--border);
+    background:var(--surface); color:var(--text);
+    font-family:'Syne',sans-serif; font-size:13px; font-weight:700;
+    cursor:pointer; transition:all .2s;
+  }
+  .btn:hover { border-color:var(--teal); color:var(--teal); }
+  .btn.primary {
+    background:linear-gradient(135deg,var(--teal),var(--teal2));
+    border-color:transparent; color:#050a12;
+    box-shadow:0 0 18px rgba(0,229,195,.2);
+  }
+  .btn.primary:hover { box-shadow:0 0 28px rgba(0,229,195,.45); transform:translateY(-1px); color:#050a12; border-color:transparent; }
+  .btn.stop {
+    background:linear-gradient(135deg,#ef4444,#dc2626);
+    border-color:transparent; color:#fff;
+  }
+  .btn.stop:hover { box-shadow:0 0 24px rgba(239,68,68,.4); color:#fff; border-color:transparent; }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .spacer { flex:1; }
+  .badge {
+    font-family:'Space Mono',monospace; font-size:10px; color:var(--muted);
+    padding:5px 10px; background:var(--surface2); border:1px solid var(--border); border-radius:6px;
+  }
+
+  /* GRID */
+  .grid { display:grid; grid-template-columns:1fr 340px; gap:20px; }
+  @media(max-width:860px){ .grid{ grid-template-columns:1fr; } }
+
+  /* VIDEO PANEL */
+  .video-panel { display:flex; flex-direction:column; gap:16px; }
+
+  .cam-wrap {
+    position:relative; border-radius:16px; overflow:hidden;
+    background:var(--surface); border:1px solid var(--border);
+    aspect-ratio:16/9;
+  }
+  #video {
+    width:100%; height:100%; object-fit:cover; display:block;
+    transform:scaleX(-1);
+  }
+  #overlay {
+    position:absolute; inset:0; pointer-events:none;
+    transform:scaleX(-1);
+  }
+
+  /* corner decorations */
+  .corner {
+    position:absolute; width:22px; height:22px;
+    border-color:var(--teal); border-style:solid; opacity:.6; pointer-events:none;
+    transition:opacity .3s;
+  }
+  .corner.tl{top:10px;left:10px;border-width:2px 0 0 2px}
+  .corner.tr{top:10px;right:10px;border-width:2px 2px 0 0}
+  .corner.bl{bottom:10px;left:10px;border-width:0 0 2px 2px}
+  .corner.br{bottom:10px;right:10px;border-width:0 2px 2px 0}
+
+  /* scan line */
+  .scan { position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .3s; }
+  .scan.active { opacity:1; }
+  .scan-line {
+    position:absolute; left:0; right:0; height:2px;
+    background:linear-gradient(90deg,transparent,var(--teal),transparent);
+    box-shadow:0 0 10px var(--teal);
+    animation:scanAnim 2.5s linear infinite;
+  }
+  @keyframes scanAnim {
+    0%{top:0;opacity:0} 5%{opacity:1} 95%{opacity:1} 100%{top:100%;opacity:0}
+  }
+
+  /* analyzing badge */
+  .ana-badge {
+    position:absolute; top:10px; right:10px;
+    display:none; align-items:center; gap:6px;
+    background:rgba(5,10,18,.85); backdrop-filter:blur(8px);
+    border:1px solid var(--teal); border-radius:7px;
+    padding:5px 11px;
+    font-family:'Space Mono',monospace; font-size:10px; color:var(--teal);
+  }
+  .ana-badge.on { display:flex; }
+  .spin {
+    width:10px; height:10px;
+    border:2px solid rgba(0,229,195,.2); border-top-color:var(--teal);
+    border-radius:50%; animation:spin .6s linear infinite;
+  }
+  @keyframes spin { to{transform:rotate(360deg)} }
+
+  /* info chips */
+  .chips { display:flex; gap:10px; flex-wrap:wrap; }
+  .chip {
+    font-family:'Space Mono',monospace; font-size:11px; color:var(--muted2);
+    padding:6px 12px; background:var(--surface); border:1px solid var(--border); border-radius:6px;
+    display:flex; align-items:center; gap:6px;
+  }
+  .chip .v { color:var(--teal); font-weight:700; }
+
+  /* log */
+  .card {
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:18px; position:relative; overflow:hidden;
+  }
+  .card::before {
+    content:''; position:absolute; top:0; left:0; right:0; height:2px;
+    background:linear-gradient(90deg,var(--teal),transparent); opacity:.4;
+  }
+  .card-title {
+    font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--muted2); font-family:'Space Mono',monospace; margin-bottom:14px;
+    display:flex; align-items:center; gap:7px;
+  }
+  .card-title::before { content:''; width:5px; height:5px; border-radius:50%; background:var(--teal); }
+
+  .log {
+    background:var(--surface2); border-radius:8px; padding:12px;
+    font-family:'Space Mono',monospace; font-size:10.5px; line-height:1.9;
+    color:var(--muted2); max-height:130px; overflow-y:auto; min-height:70px;
+  }
+  .log::-webkit-scrollbar { width:3px; }
+  .log::-webkit-scrollbar-thumb { background:var(--border); }
+  .ts { color:var(--muted); }
+  .c-ok { color:var(--happy); }
+  .c-info { color:var(--teal); }
+  .c-warn { color:var(--surprised); }
+  .c-err { color:var(--angry); }
+
+  /* SIDE PANEL */
+  .side { display:flex; flex-direction:column; gap:16px; }
+
+  /* dominant */
+  .dominant-inner { text-align:center; padding:12px 0 6px; }
+  .big-emoji {
+    font-size:60px; line-height:1; display:block; margin-bottom:8px;
+    transition:all .4s cubic-bezier(.34,1.56,.64,1);
+    filter:drop-shadow(0 0 16px rgba(255,255,255,.08));
+  }
+  .emo-name {
+    font-size:24px; font-weight:800; text-transform:uppercase; letter-spacing:2px;
+    transition:color .4s; margin-bottom:3px;
+  }
+  .emo-conf {
+    font-family:'Space Mono',monospace; font-size:12px; color:var(--muted2);
+  }
+  .emo-conf span { color:var(--teal); }
+  .idle-msg {
+    text-align:center; padding:18px; color:var(--muted); font-size:13px; line-height:1.8;
+  }
+  .idle-msg .ico { font-size:30px; display:block; margin-bottom:6px; }
+
+  /* bars */
+  .bars { display:flex; flex-direction:column; gap:9px; }
+  .bar-row { display:flex; align-items:center; gap:9px; }
+  .bar-lbl {
+    width:68px; font-size:11px; font-weight:700; color:var(--muted2);
+    font-family:'Space Mono',monospace; flex-shrink:0;
+  }
+  .bar-track {
+    flex:1; height:5px; background:var(--surface2); border-radius:3px; overflow:hidden;
+  }
+  .bar-fill { height:100%; border-radius:3px; width:0%; transition:width .5s cubic-bezier(.4,0,.2,1); }
+  .bar-pct { width:34px; text-align:right; font-family:'Space Mono',monospace; font-size:10px; color:var(--muted2); }
+
+  /* history */
+  .hist-list { display:flex; flex-direction:column; gap:7px; max-height:185px; overflow-y:auto; }
+  .hist-list::-webkit-scrollbar { width:3px; }
+  .hist-list::-webkit-scrollbar-thumb { background:var(--border); }
+  .hist-item {
+    display:flex; align-items:center; gap:9px; padding:7px 9px;
+    background:var(--surface2); border-radius:7px; font-size:12px;
+    border-left:3px solid transparent;
+    animation:slideIn .25s ease;
+  }
+  @keyframes slideIn { from{opacity:0;transform:translateX(-8px)} to{opacity:1;transform:translateX(0)} }
+  .h-emo { font-size:15px; }
+  .h-name { font-weight:700; flex:1; }
+  .h-conf { font-family:'Space Mono',monospace; font-size:10px; color:var(--muted2); }
+  .h-time { font-family:'Space Mono',monospace; font-size:10px; color:var(--muted); }
+
+  /* toast */
+  .toast {
+    position:fixed; bottom:22px; right:22px; z-index:200;
+    background:#1a0808; border:1px solid var(--angry); border-radius:10px;
+    padding:13px 17px; font-size:13px; color:#fca5a5; max-width:340px;
+    display:none; animation:toastIn .3s ease;
+  }
+  .toast.on { display:block; }
+  @keyframes toastIn { from{opacity:0;transform:translateY(8px)} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon"></div>
+    <div class="logo-text">Emotion<span>AI</span></div>
+  </div>
+  <div class="hdr-right">
+    <div class="status-pill">
+      <div class="dot" id="dot"></div>
+      <span id="statusTxt">LOADING</span>
+    </div>
+  </div>
+</header>
+
+<!-- LOADER -->
+<div id="loader">
+  <div class="loader-box">
+    <h2>Loading <span>AI Models</span></h2>
+    <p>Downloading face detection & emotion recognition models.<br></p>
+    <div class="progress-bar"><div class="progress-fill" id="prog"></div></div>
+    <div class="progress-label" id="progLabel">Initializing...</div>
+    <div class="loader-steps">
+      <div class="step" id="s1"><span class="step-icon">⏳</span> Loading face detection model</div>
+      <div class="step" id="s2"><span class="step-icon">⏳</span> Loading landmark model</div>
+      <div class="step" id="s3"><span class="step-icon">⏳</span> Loading expression model</div>
+      <div class="step" id="s4"><span class="step-icon">⏳</span> Starting camera</div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+
+  <div class="controls">
+    <button class="btn primary" id="startBtn" onclick="toggleDetection()">▶ Start Detection</button>
+    <div class="spacer"></div>
+    <button class="btn" onclick="clearAll()">🗑 Clear</button>
+  
+  </div>
+
+  <div class="grid">
+
+    <!-- Video -->
+    <div class="video-panel">
+      <div class="cam-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="corner tl"></div>
+        <div class="corner tr"></div>
+        <div class="corner bl"></div>
+        <div class="corner br"></div>
+        <div class="scan" id="scan"><div class="scan-line"></div></div>
+        <div class="ana-badge" id="anaBadge"><div class="spin"></div> Detecting...</div>
+      </div>
+
+      <div class="chips">
+        <div class="chip">Detections: <span class="v" id="cCount">0</span></div>
+        <div class="chip">FPS: <span class="v" id="cFps">—</span></div>
+        <div class="chip">Faces: <span class="v" id="cFaces">0</span></div>
+        <div class="chip">Mode: <span class="v" id="cMode">IDLE</span></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Live Log</div>
+        <div class="log" id="logEl">
+          <div><span class="ts">[--:--:--]</span> <span class="c-info">Loading AI models from CDN…</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Side -->
+    <div class="side">
+
+      <div class="card">
+        <div class="card-title">Dominant Emotion</div>
+        <div id="domEl">
+          <div class="idle-msg"><span class="ico">🎭</span>Start detection to<br>see live results</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Emotion Breakdown</div>
+        <div class="bars" id="barsEl"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Detection History</div>
+        <div class="hist-list" id="histEl">
+          <div style="color:var(--muted);font-size:12px;text-align:center;padding:10px">No detections yet</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const EMOTIONS = [
+  { key:'happy',     label:'Happy',     emoji:'😄', color:'#22c55e' },
+  { key:'sad',       label:'Sad',       emoji:'😢', color:'#60a5fa' },
+  { key:'angry',     label:'Angry',     emoji:'😠', color:'#ef4444' },
+  { key:'fearful',   label:'Fearful',   emoji:'😨', color:'#a855f7' },
+  { key:'surprised', label:'Surprised', emoji:'😲', color:'#f59e0b' },
+  { key:'disgusted', label:'Disgusted', emoji:'🤢', color:'#f97316' },
+  { key:'neutral',   label:'Neutral',   emoji:'😐', color:'#94a3b8' },
+];
+
+// Build bars
+const barsEl = document.getElementById('barsEl');
+barsEl.innerHTML = EMOTIONS.map(e => `
+  <div class="bar-row">
+    <div class="bar-lbl">${e.label}</div>
+    <div class="bar-track"><div class="bar-fill" id="b_${e.key}" style="background:${e.color}"></div></div>
+    <div class="bar-pct" id="p_${e.key}">0%</div>
+  </div>`).join('');
+
+let running = false;
+let animFrame = null;
+let lastFpsTime = performance.now();
+let frameCount = 0;
+let detCount = 0;
+let history = [];
+
+// ── MODEL LOADING ──
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model';
+
+function stepDone(n, ok=true) {
+  const el = document.getElementById('s'+n);
+  el.classList.add(ok ? 'done' : 'active');
+  el.querySelector('.step-icon').textContent = ok ? '✅' : '❌';
+}
+function setProgress(pct, label) {
+  document.getElementById('prog').style.width = pct+'%';
+  document.getElementById('progLabel').textContent = label;
+}
+
+async function loadModels() {
+  try {
+    document.getElementById('s1').classList.add('active');
+    setProgress(10, 'Loading face detection model…');
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    stepDone(1); setProgress(35, 'Loading landmark model…');
+
+    document.getElementById('s2').classList.add('active');
+    await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL);
+    stepDone(2); setProgress(60, 'Loading expression model…');
+
+    document.getElementById('s3').classList.add('active');
+    await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+    stepDone(3); setProgress(80, 'Starting camera…');
+
+    document.getElementById('s4').classList.add('active');
+    await startCamera();
+    stepDone(4); setProgress(100, 'Ready!');
+
+    setTimeout(() => {
+      document.getElementById('loader').style.display = 'none';
+      document.getElementById('app').classList.add('visible');
+      document.getElementById('statusTxt').textContent = 'READY';
+      log('ok', 'All models loaded. Click Start Detection.');
+    }, 600);
+
+  } catch(err) {
+    log('err', 'Load error: ' + err.message);
+    toast('Failed to load models: ' + err.message);
+    setProgress(0, 'Error — check your internet connection and refresh');
+  }
+}
+
+async function startCamera() {
+  const video = document.getElementById('video');
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: { ideal:1280 }, height: { ideal:720 }, facingMode:'user' },
+    audio: false
+  });
+  video.srcObject = stream;
+  return new Promise(res => { video.onloadedmetadata = () => res(); });
+}
+
+// ── DETECTION LOOP ──
+function toggleDetection() {
+  running ? stopDetection() : startDetection();
+}
+
+function startDetection() {
+  running = true;
+  document.getElementById('startBtn').textContent = '⏹ Stop Detection';
+  document.getElementById('startBtn').className = 'btn stop';
+  document.getElementById('scan').classList.add('active');
+  document.getElementById('dot').classList.add('live');
+  document.getElementById('statusTxt').textContent = 'LIVE';
+  document.getElementById('cMode').textContent = 'AUTO';
+  log('ok', 'Detection started');
+  detectLoop();
+}
+
+function stopDetection() {
+  running = false;
+  if (animFrame) cancelAnimationFrame(animFrame);
+  document.getElementById('startBtn').textContent = '▶ Start Detection';
+  document.getElementById('startBtn').className = 'btn primary';
+  document.getElementById('scan').classList.remove('active');
+  document.getElementById('dot').classList.remove('live');
+  document.getElementById('statusTxt').textContent = 'PAUSED';
+  document.getElementById('cMode').textContent = 'IDLE';
+  document.getElementById('anaBadge').classList.remove('on');
+  // clear canvas
+  const cv = document.getElementById('overlay');
+  cv.getContext('2d').clearRect(0, 0, cv.width, cv.height);
+  log('info', 'Detection stopped');
+}
+
+async function detectLoop() {
+  if (!running) return;
+
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('overlay');
+
+  // Match canvas to video display size
+  const rect = video.getBoundingClientRect();
+  canvas.width = video.videoWidth || rect.width;
+  canvas.height = video.videoHeight || rect.height;
+  canvas.style.width = '100%';
+  canvas.style.height = '100%';
+  canvas.style.position = 'absolute';
+  canvas.style.top = '0'; canvas.style.left = '0';
+
+  document.getElementById('anaBadge').classList.add('on');
+
+  const opts = new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 });
+
+  try {
+    const results = await faceapi
+      .detectAllFaces(video, opts)
+      .withFaceLandmarks(true)
+      .withFaceExpressions();
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    document.getElementById('cFaces').textContent = results.length;
+
+    if (results.length > 0) {
+      // draw detections with mirrored coordinates
+      const dims = { width: canvas.width, height: canvas.height };
+
+      results.forEach(r => {
+        const box = r.detection.box;
+        // mirror x because video is mirrored
+        const mx = canvas.width - box.x - box.width;
+
+        // Main bounding box
+        const expr = r.expressions;
+        const dom = getDominant(expr);
+        const emo = EMOTIONS.find(e => e.key === dom.key) || EMOTIONS[6];
+
+        ctx.strokeStyle = emo.color;
+        ctx.lineWidth = 2;
+        ctx.shadowColor = emo.color;
+        ctx.shadowBlur = 10;
+        ctx.strokeRect(mx, box.y, box.width, box.height);
+        ctx.shadowBlur = 0;
+
+        // Corner accents
+        const clen = 16;
+        ctx.lineWidth = 3;
+        [[mx, box.y],[mx+box.width-clen, box.y],[mx, box.y+box.height-clen],[mx+box.width-clen, box.y+box.height-clen]].forEach(([cx,cy],i) => {
+          ctx.beginPath();
+          if (i===0){ ctx.moveTo(cx,cy+clen); ctx.lineTo(cx,cy); ctx.lineTo(cx+clen,cy); }
+          else if(i===1){ ctx.moveTo(cx,cy); ctx.lineTo(cx+clen,cy); ctx.lineTo(cx+clen,cy+clen); }
+          else if(i===2){ ctx.moveTo(cx,cy); ctx.lineTo(cx,cy+clen); ctx.lineTo(cx+clen,cy+clen); }
+          else{ ctx.moveTo(cx,cy); ctx.lineTo(cx+clen,cy); ctx.lineTo(cx+clen,cy-clen); }
+          ctx.strokeStyle = emo.color; ctx.stroke();
+        });
+
+        // Label
+        const label = `${emo.emoji} ${emo.label} ${Math.round(dom.score*100)}%`;
+        ctx.font = 'bold 13px Space Mono, monospace';
+        const tw = ctx.measureText(label).width;
+        ctx.fillStyle = 'rgba(5,10,18,0.8)';
+        ctx.fillRect(mx, box.y - 26, tw + 14, 22);
+        ctx.fillStyle = emo.color;
+        ctx.fillText(label, mx + 7, box.y - 9);
+
+        // Draw landmarks
+        if (r.landmarks) {
+          const pts = r.landmarks.positions;
+          ctx.fillStyle = 'rgba(0,229,195,0.5)';
+          pts.forEach(pt => {
+            const lmx = canvas.width - pt.x;
+            ctx.beginPath();
+            ctx.arc(lmx, pt.y, 1.5, 0, Math.PI*2);
+            ctx.fill();
+          });
+        }
+      });
+
+      // Use first face for side panel
+      const first = results[0];
+      const dom = getDominant(first.expressions);
+      updatePanel(first.expressions, dom);
+      detCount++;
+      document.getElementById('cCount').textContent = detCount;
+      addHistory(dom, first.expressions);
+
+    } else {
+      document.getElementById('domEl').innerHTML =
+        `<div class="idle-msg"><span class="ico">🔍</span>No face detected<br><small style="font-size:11px;color:var(--muted)">Move closer to the camera</small></div>`;
+    }
+
+  } catch(err) {
+    console.error(err);
+  }
+
+  // FPS counter
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 1000) {
+    document.getElementById('cFps').textContent = frameCount;
+    frameCount = 0; lastFpsTime = now;
+  }
+
+  document.getElementById('anaBadge').classList.remove('on');
+  animFrame = requestAnimationFrame(detectLoop);
+}
+
+function getDominant(expr) {
+  let best = { key:'neutral', score:0 };
+  for (const [k,v] of Object.entries(expr)) {
+    if (v > best.score) best = { key:k, score:v };
+  }
+  return best;
+}
+
+function updatePanel(expr, dom) {
+  const emo = EMOTIONS.find(e => e.key === dom.key) || EMOTIONS[6];
+  document.getElementById('domEl').innerHTML = `
+    <div class="dominant-inner">
+      <span class="big-emoji">${emo.emoji}</span>
+      <div class="emo-name" style="color:${emo.color}">${emo.label}</div>
+      <div class="emo-conf">Confidence: <span>${Math.round(dom.score*100)}%</span></div>
+    </div>`;
+
+  EMOTIONS.forEach(e => {
+    const val = Math.round((expr[e.key] || 0) * 100);
+    const b = document.getElementById('b_' + e.key);
+    const p = document.getElementById('p_' + e.key);
+    if (b) b.style.width = val + '%';
+    if (p) p.textContent = val + '%';
+  });
+}
+
+function addHistory(dom, expr) {
+  // Throttle: only add if >1s since last or emotion changed
+  const emo = EMOTIONS.find(e => e.key === dom.key) || EMOTIONS[6];
+  const last = history[0];
+  const now = new Date();
+  const ts = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  if (last && last.key === dom.key && (now - last.time) < 2000) return;
+
+  history.unshift({ key: dom.key, time: now });
+  if (history.length > 20) history.pop();
+
+  const list = document.getElementById('histEl');
+  const placeholder = list.querySelector('[style*="color:var(--muted)"]');
+  if (placeholder) placeholder.remove();
+
+  const div = document.createElement('div');
+  div.className = 'hist-item';
+  div.style.borderLeftColor = emo.color;
+  div.innerHTML = `
+    <span class="h-emo">${emo.emoji}</span>
+    <span class="h-name" style="color:${emo.color}">${emo.label}</span>
+    <span class="h-conf">${Math.round(dom.score*100)}%</span>
+    <span class="h-time">${ts}</span>`;
+  list.insertBefore(div, list.firstChild);
+  while (list.children.length > 20) list.removeChild(list.lastChild);
+}
+
+function clearAll() {
+  history = []; detCount = 0;
+  document.getElementById('histEl').innerHTML =
+    '<div style="color:var(--muted);font-size:12px;text-align:center;padding:10px">No detections yet</div>';
+  document.getElementById('cCount').textContent = '0';
+  document.getElementById('domEl').innerHTML =
+    '<div class="idle-msg"><span class="ico">🎭</span>Cleared</div>';
+  EMOTIONS.forEach(e => {
+    const b = document.getElementById('b_'+e.key);
+    const p = document.getElementById('p_'+e.key);
+    if(b) b.style.width='0%';
+    if(p) p.textContent='0%';
+  });
+  log('info','History cleared');
+}
+
+// ── LOG / TOAST ──
+function log(type, msg) {
+  const el = document.getElementById('logEl');
+  const ts = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const d = document.createElement('div');
+  d.innerHTML = `<span class="ts">[${ts}]</span> <span class="c-${type}">${msg}</span>`;
+  el.insertBefore(d, el.firstChild);
+  while(el.children.length > 60) el.removeChild(el.lastChild);
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 5000);
+}
+
+// ── BOOT ──
+window.addEventListener('load', () => {
+  // wait for face-api script
+  const wait = setInterval(() => {
+    if (typeof faceapi !== 'undefined') {
+      clearInterval(wait);
+      loadModels();
+    }
+  }, 100);
+});
+</script>
+</body>
+</html>
